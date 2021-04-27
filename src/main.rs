@@ -29,16 +29,16 @@ fn main() {
                 loaded_movie = parsers::parse(cli_parts[1]);
                 println!("LEN: {}", loaded_movie.inputs.len());
                 
-                let mut prepends = Vec::<u8>::new();
+                /*let mut prepends = Vec::<u8>::new();
                 prepends.push(0x10);
                 prepends.push(0x00);
                 
-                for _ in 0..64 {
+                for _ in 0..126 {
                     prepends.push(0x00);
                     prepends.push(0x00);
                 }
                 
-                loaded_movie.prepend(&prepends, true);
+                loaded_movie.prepend(&prepends, true);*/
             },
             
             "port" => { port = load_port(false).unwrap() },
@@ -48,6 +48,8 @@ fn main() {
             "program" => { program(&mut port, &mut loaded_movie) },
             
             "everdrive" => { everdrive_start(&mut port) },
+            
+            "start" => { reset_start(&mut port) },
             
             "stop" | "exit" => { running = false },
             _ => ()
@@ -119,9 +121,20 @@ fn everdrive_start(port: &mut Box<dyn SerialPort>) {
     }
 }
 
+fn reset_start(port: &mut Box<dyn SerialPort>) {
+    let mut buf = [0u8];
+    write_read(port, &[0x06], &mut buf);
+    
+    if buf[0] == 0xDD {
+        println!("Acknowledged, playback started!")
+    } else {
+        println!("err: {:#04x}", buf[0]);
+    }
+}
+
 fn write_read(port: &mut Box<dyn SerialPort>, write_buf: &[u8], read_buf: &mut [u8]) {
-    port.write(write_buf).unwrap();
-    port.read(read_buf).unwrap();
+    port.write_all(write_buf).unwrap();
+    port.read_exact(read_buf).unwrap();
 }
 
 fn load_port(use_first: bool) -> Option<Box<dyn SerialPort>> {
