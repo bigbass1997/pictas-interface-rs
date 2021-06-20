@@ -5,8 +5,10 @@ use serialport::{SerialPort, ClearBuffer};
 use std::io::Write;
 use std::time::Duration;
 
+type UsbPort<'a> = &'a mut Box<dyn SerialPort>;
+
 fn main() {
-    let mut port = load_port(true).unwrap();
+    let port: UsbPort = &mut load_port(true).unwrap();
     let mut loaded_movie = Movie::none();
     
     let mut running = true;
@@ -41,15 +43,18 @@ fn main() {
                 loaded_movie.prepend(&prepends, true);*/
             },
             
-            "port" => { port = load_port(false).unwrap() },
+            "port" => { *port = load_port(false).unwrap() },
             
-            "ping" => { ping(&mut port) },
+            "ping" => { ping(port) },
             
-            "program" => { program(&mut port, &mut loaded_movie) },
+            "program" => { program(port, &mut loaded_movie) },
+            "config" => { program_config(port, &mut loaded_movie).unwrap_or(()) },
             
-            "everdrive" => { everdrive_start(&mut port) },
+            "everdrive" => { everdrive_start(port) },
             
-            "start" => { reset_start(&mut port) },
+            "start" => { reset_start(port) },
+
+            "manual" => { manual_start(port) },
             
             "stop" | "exit" => { running = false },
             _ => ()
@@ -57,7 +62,7 @@ fn main() {
     }
 }
 
-fn ping(port: &mut Box<dyn SerialPort>) {
+fn ping(port: UsbPort) {
     let mut buf = [0u8];
     write_read(port, &[0x01], &mut buf);
     
@@ -68,16 +73,27 @@ fn ping(port: &mut Box<dyn SerialPort>) {
     }
 }
 
-fn program(port: &mut Box<dyn SerialPort>, movie: &mut Movie) {
+fn program(port: UsbPort, movie: &Movie) {
+    match program_inputs(port, movie) {
+        Ok(_) => (),
+        Err(e) => { println!("{}", e); return; },
+    }
+    
+    match program_config(port, movie) {
+        Ok(_) => (),
+        Err(e) => println!("{}", e),
+    }
+}
+
+fn program_inputs(port: UsbPort, movie: &Movie) -> Result<(), String> {
     if movie.file_type == parsers::FileType::NONE {
-        println!("You need to load a TAS first!");
-        return;
+        return Err(String::from("You need to load a TAS first!"));
     }
     
     let old_timeout = port.timeout();
     port.set_timeout(Duration::from_secs(60)).unwrap();
     
-    let blocks = movie.to_blocks();
+    let blocks = movie.input_blocks();
     
     port.write(&[0xAA]).unwrap(); // initiate programming sequence
     
@@ -95,8 +111,9 @@ fn program(port: &mut Box<dyn SerialPort>, movie: &mut Movie) {
             println!("Write/read mismatch! Block #{}", i);
         }
         
-        if i > 0 && i % 16 == 0 {
-            println!("blocks programmed/remaining: {}/{}", i, blocks.len());
+        let j = i + 1;
+        if j > 0 && j % 16 == 0 {
+            println!("blocks programmed/total: {}/{}", j, blocks.len());
         }
     }
     
@@ -107,10 +124,57 @@ fn program(port: &mut Box<dyn SerialPort>, movie: &mut Movie) {
     port.clear(ClearBuffer::All).unwrap();
     port.set_timeout(old_timeout).unwrap();
     
-    println!("Programming complete.")
+    println!("TAS programming complete.");
+    
+    Ok(())
 }
 
-fn everdrive_start(port: &mut Box<dyn SerialPort>) {
+fn program_config(port: UsbPort, movie: &Movie) -> Result<(), String> {
+    if movie.file_type == parsers::FileType::NONE {
+        return Err(String::from("You need to load a TAS first!"));
+    }
+    
+    let old_timeout = port.timeout();
+    port.set_timeout(Duration::from_secs(60)).unwrap();
+    
+    let blocks = movie.config_blocks();
+    
+    port.write(&[0xAB]).unwrap(); // initiate programming sequence
+    
+    for (i, block) in blocks.iter().enumerate() {
+        let mut sync_byte_buf = [0u8];
+        port.read(&mut sync_byte_buf).unwrap(); // wait for block request
+        if sync_byte_buf[0] != 0x01 {
+            panic!("Programming sync byte mismatch, programmed data could be corrupt!");
+        }
+        port.write(&[0x01]).unwrap();
+        
+        let mut read_verify_buf = [0u8; 256];
+        write_read(port, block, &mut read_verify_buf);  // write block and read block back from device
+        if *block != read_verify_buf {                  // if block doesn't match original, USB corruption may have happened
+            println!("Write/read mismatch! Block #{}", i);
+        }
+        
+        if (i + 1) % 4 == 0 {
+            println!("blocks programmed/total: {}/{}", i + 1, blocks.len());
+        }
+    }
+    
+    let mut sync_byte_buf = [0u8];
+    port.read(&mut sync_byte_buf).unwrap(); // wait for OK signal (0xDD)
+    
+    port.clear(ClearBuffer::All).unwrap();
+    port.set_timeout(old_timeout).unwrap();
+    
+    if sync_byte_buf[0] == 0xDD {
+        println!("Config programming complete.");
+        return Ok(());
+    }
+    
+    Err(String::from(format!("Config programming failed: {:#04X}", sync_byte_buf[0])))
+}
+
+fn everdrive_start(port: UsbPort) {
     let mut buf = [0u8];
     write_read(port, &[0x05], &mut buf);
     
@@ -121,7 +185,7 @@ fn everdrive_start(port: &mut Box<dyn SerialPort>) {
     }
 }
 
-fn reset_start(port: &mut Box<dyn SerialPort>) {
+fn reset_start(port: UsbPort) {
     let mut buf = [0u8];
     write_read(port, &[0x06], &mut buf);
     
@@ -132,7 +196,18 @@ fn reset_start(port: &mut Box<dyn SerialPort>) {
     }
 }
 
-fn write_read(port: &mut Box<dyn SerialPort>, write_buf: &[u8], read_buf: &mut [u8]) {
+fn manual_start(port: UsbPort) {
+    let mut buf = [0u8];
+    write_read(port, &[0x07], &mut buf);
+    
+    if buf[0] == 0xDD {
+        println!("Acknowledged, press console reset button to start TAS playback.")
+    } else {
+        println!("err: {:#04x}", buf[0]);
+    }
+}
+
+fn write_read(port: UsbPort, write_buf: &[u8], read_buf: &mut [u8]) {
     port.write_all(write_buf).unwrap();
     port.read_exact(read_buf).unwrap();
 }
