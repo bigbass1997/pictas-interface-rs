@@ -3,19 +3,21 @@ use FileType::*;
 #[allow(dead_code)]
 #[derive(PartialEq, Debug, Clone)]
 pub enum FileType {
+    TASD,
     M64,
-    R08, R16,
+    R08,
+    R16M,
     NONE
 }
 
 #[derive(Debug, Clone)]
-pub struct Movie {
+pub struct InputsMovie {
     pub inputs: Vec<u8>,
     pub file_type: FileType,
 }
-impl Movie {
+impl InputsMovie {
     pub fn new(file_type: FileType) -> Self {
-        Movie {
+        InputsMovie {
             inputs: Vec::new(),
             file_type: file_type,
         }
@@ -99,21 +101,25 @@ impl Movie {
     }
 }
 
-pub fn parse(path: &str) -> Movie {
+pub fn parse(path: &str) -> InputsMovie {
     let suffix = path.split(".").last().unwrap().to_ascii_lowercase();
     println!("SUFFIX: {}", suffix);
     let f = match suffix.as_str() {
+        "tasd" => TASD,
         "m64" => M64,
         "r08" => R08,
-        "r16" => R16,
+        "r16m" => R16M,
         _ => { panic!("Unsupported file type! Ensure file name ends with proper file extension."); }
     };
-    let mut movie = Movie::new(f);
+    let mut movie = InputsMovie::new(f);
     
     let bytes = std::fs::read(path).unwrap_or(vec![]);
     
     match movie.file_type {
-        M64 | R16 => {
+        TASD => {
+            
+        },
+        M64 | R16M => {
             unimplemented!();
         },
         R08 => {
