@@ -1,4 +1,7 @@
 use FileType::*;
+use tasd_edit::movie::TasdMovie;
+use std::path::PathBuf;
+use tasd_edit::definitions::{INPUT_CHUNKS, InputChunks};
 
 #[allow(dead_code)]
 #[derive(PartialEq, Debug, Clone)]
@@ -7,6 +10,7 @@ pub enum FileType {
     M64,
     R08,
     R16M,
+    A2600Bin,
     NONE
 }
 
@@ -109,15 +113,37 @@ pub fn parse(path: &str) -> InputsMovie {
         "m64" => M64,
         "r08" => R08,
         "r16m" => R16M,
+        "bin" => A2600Bin,
         _ => { panic!("Unsupported file type! Ensure file name ends with proper file extension."); }
     };
     let mut movie = InputsMovie::new(f);
     
-    let bytes = std::fs::read(path).unwrap_or(vec![]);
+    let bytes = std::fs::read(path.clone()).unwrap_or(vec![]);
     
     match movie.file_type {
         TASD => {
+            //TODO: convert entire project to only support TASD
             
+            // Assumes data is NES, 2 controllers.
+            let tasd = TasdMovie::new(&PathBuf::from(path)).unwrap();
+            let search = tasd.search_by_key(vec![INPUT_CHUNKS]);
+            
+            let mut port1 = Vec::new();
+            let mut port2 = Vec::new();
+            for packet in search {
+                let packet = packet.as_any().downcast_ref::<InputChunks>().unwrap();
+                if packet.port == 1 { packet.payload.iter().for_each(|byte| port1.push(*byte)) }
+                if packet.port == 2 { packet.payload.iter().for_each(|byte| port2.push(*byte)) }
+            }
+            
+            for i in 0..port1.len() {
+                movie.inputs.push(port1[i]);
+                movie.inputs.push(port2[i]);
+            }
+            
+            for _ in 0..48000 {
+                movie.inputs.push(0xFF); // temporary until PICTAS properly stops at the end of a TAS.
+            }
         },
         M64 | R16M => {
             unimplemented!();
@@ -137,6 +163,9 @@ pub fn parse(path: &str) -> InputsMovie {
             }*/
             
             movie.inputs.iter_mut().for_each(|b| { *b ^= 0xFF });
+        },
+        A2600Bin => {
+            movie.inputs = bytes.clone();
         },
         NONE => ()
     }

@@ -44,6 +44,7 @@ impl Device {
     }
     
     pub fn ping(&mut self) -> Result<String, u8> {
+        self.port.as_mut().unwrap().clear(ClearBuffer::All).unwrap();
         let mut buf = [0u8];
         Self::write_read(self.port.as_mut().unwrap(), CMD_PING, &mut buf);
         
@@ -165,6 +166,17 @@ impl Device {
     pub fn reset_start(&mut self) -> Result<String, u8> {
         let mut buf = [0u8];
         Self::write_read(self.port.as_mut().unwrap(), CMD_RESET_START, &mut buf);
+        
+        if buf[0] == ACKNOWLEDGED {
+            Result::Ok(String::from("Acknowledged, playback started!"))
+        } else {
+            Result::Err(buf[0])
+        }
+    }
+    
+    pub fn atari_start(&mut self) -> Result<String, u8> {
+        let mut buf = [0u8];
+        Self::write_read(self.port.as_mut().unwrap(), &[0x08], &mut buf);
         
         if buf[0] == ACKNOWLEDGED {
             Result::Ok(String::from("Acknowledged, playback started!"))

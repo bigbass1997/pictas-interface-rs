@@ -68,6 +68,11 @@ fn main() {
                 Err(val) => println!("{}", val),
             };},
             
+            "atari" => { match device.atari_start() {
+                Ok(_) => (),
+                Err(val) => println!("{}", val),
+            };},
+            
             //"manual" => { manual_start(port) },
             
             //"dump" => { dump(port) },
